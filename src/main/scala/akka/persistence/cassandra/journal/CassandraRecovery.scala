@@ -58,18 +58,27 @@ trait CassandraRecovery extends ActorLogging {
             (row.getBool("used"), row.getLong("sequence_nr"))
           }
         }
-        .flatMap {
-          // never been to this partition
-          case None                   => Future.successful(currentSnr)
-          // don't currently explicitly set false
-          case Some((false, _))       => Future.successful(currentSnr)
-          // everything deleted in this partition, move to the next
-          case Some((true, 0))        => find(currentPnr + 1, currentSnr)
-          case Some((_, nextHighest)) => find(currentPnr + 1, nextHighest)
+        .flatMap { x =>
+          log.debug("FindHighestSequenceNr query, persistenceId: {}, partition: {}, result: {}", persistenceId, currentPnr, x)
+          x match {
+            // never been to this partition
+            case None =>
+
+              Future.successful(currentSnr)
+            // don't currently explicitly set false
+            case Some((false, _))       => Future.successful(currentSnr)
+            // everything deleted in this partition, move to the next
+            case Some((true, 0))        => find(currentPnr + 1, currentSnr)
+            case Some((_, nextHighest)) => find(currentPnr + 1, nextHighest)
+          }
         }
     }
 
-    find(partitionNr(fromSequenceNr), fromSequenceNr)
+    val result = find(partitionNr(fromSequenceNr), fromSequenceNr)
+    result.onComplete { x =>
+      log.debug("FindHighestSequenceNr final result, persistenceId: {}, result: {}", persistenceId, x)
+    }
+    result
   }
 
   def asyncHighestDeletedSequenceNumber(persistenceId: String): Future[Long] = {
